@@ -1,7 +1,18 @@
 "use client"
 
 import { useState } from "react"
-import { Play, RotateCcw, ChevronLeft, ChevronRight, Network, Calculator, TrendingUp, TestTube } from "lucide-react"
+import {
+  Play,
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  Network,
+  Calculator,
+  TrendingUp,
+  TestTube,
+  Wifi,
+  WifiOff,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -10,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { GraphVisualization } from "@/components/graph-visualization"
 
 interface AlgorithmResults {
   matrices: string[][]
@@ -31,20 +43,40 @@ inf inf inf inf 0`)
   const [currentStep, setCurrentStep] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [serverStatus, setServerStatus] = useState<"unknown" | "connected" | "disconnected">("unknown")
+
+  // URLs alternatives à tester
+  const API_URLS = ["http://localhost:5001", "http://127.0.0.1:5001", "http://0.0.0.0:5001"]
 
   const testConnection = async () => {
-    try {
-      const response = await fetch("http://localhost:5001/api/health")
-      const data = await response.json()
-      if (data.status === "OK") {
-        setError("")
-        alert("✅ Connexion au serveur réussie !")
-      } else {
-        setError("Serveur accessible mais réponse inattendue")
+    setServerStatus("unknown")
+
+    for (const baseUrl of API_URLS) {
+      try {
+        console.log(`Test de connexion à ${baseUrl}...`)
+        const response = await fetch(`${baseUrl}/api/health`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log(`✅ Connexion réussie à ${baseUrl}:`, data)
+          setServerStatus("connected")
+          setError("")
+          alert(`✅ Connexion réussie à ${baseUrl}!\nStatut: ${data.status}\nMessage: ${data.message}`)
+          return baseUrl // Retourner l'URL qui fonctionne
+        }
+      } catch (err) {
+        console.log(`❌ Échec de connexion à ${baseUrl}:`, err)
       }
-    } catch (err) {
-      setError("❌ Impossible de se connecter au serveur Flask sur le port 5001")
     }
+
+    setServerStatus("disconnected")
+    setError("❌ Impossible de se connecter au serveur Flask. Vérifiez qu'il est démarré sur le port 5001.")
+    return null
   }
 
   const processMatrix = async () => {
@@ -99,16 +131,41 @@ inf inf inf inf 0`)
 
       console.log("Matrice à envoyer:", matrix)
 
-      const response = await fetch("http://localhost:5001/api/process", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matrix: matrix,
-          mode: mode,
-        }),
-      })
+      // Tester plusieurs URLs si nécessaire
+      let response = null
+      let lastError = null
+
+      for (const baseUrl of API_URLS) {
+        try {
+          console.log(`Tentative avec ${baseUrl}...`)
+          response = await fetch(`${baseUrl}/api/process`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              matrix: matrix,
+              mode: mode,
+            }),
+          })
+
+          if (response.ok) {
+            console.log(`✅ Succès avec ${baseUrl}`)
+            break
+          } else {
+            console.log(`❌ Échec avec ${baseUrl}: ${response.status}`)
+            lastError = `HTTP ${response.status}`
+          }
+        } catch (err) {
+          console.log(`❌ Erreur avec ${baseUrl}:`, err)
+          lastError = err
+          response = null
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(`Impossible de se connecter au serveur. Dernière erreur: ${lastError}`)
+      }
 
       const data = await response.json()
       console.log("Réponse du serveur:", data)
@@ -117,16 +174,19 @@ inf inf inf inf 0`)
         setResults(data.results)
         setCurrentStep(0)
         setError("")
+        setServerStatus("connected")
       } else {
         setError(data.message || "Erreur inconnue du serveur")
+        setServerStatus("disconnected")
       }
     } catch (err) {
       console.error("Erreur:", err)
       if (err instanceof Error) {
         setError(err.message)
       } else {
-        setError("Erreur de connexion au serveur. Assurez-vous que le serveur Flask est démarré sur le port 5001.")
+        setError("Erreur de connexion au serveur.")
       }
+      setServerStatus("disconnected")
     } finally {
       setLoading(false)
     }
@@ -235,11 +295,17 @@ inf inf 0`,
             </div>
             <div className="flex items-center space-x-3">
               <Button variant="outline" size="sm" onClick={testConnection}>
-                <TestTube className="h-4 w-4 mr-2" />
+                {serverStatus === "connected" ? (
+                  <Wifi className="h-4 w-4 mr-2 text-green-600" />
+                ) : serverStatus === "disconnected" ? (
+                  <WifiOff className="h-4 w-4 mr-2 text-red-600" />
+                ) : (
+                  <TestTube className="h-4 w-4 mr-2" />
+                )}
                 Test Connexion
               </Button>
-              <Badge variant="outline" className="text-sm">
-                Floyd-Warshall Modifié
+              <Badge variant={serverStatus === "connected" ? "default" : "destructive"} className="text-sm">
+                {serverStatus === "connected" ? "Connecté" : serverStatus === "disconnected" ? "Déconnecté" : "Inconnu"}
               </Badge>
             </div>
           </div>
@@ -274,6 +340,17 @@ inf inf 0`,
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="space-y-4">
+                  {/* Statut de connexion */}
+                  {serverStatus === "disconnected" && (
+                    <Alert variant="destructive">
+                      <WifiOff className="h-4 w-4" />
+                      <AlertDescription>
+                        Serveur Flask non accessible. Assurez-vous qu'il est démarré avec :
+                        <code className="ml-2 bg-slate-100 px-2 py-1 rounded">python3 scripts/flask_server.py</code>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
                   {/* Exemples prédéfinis */}
                   <div>
                     <Label className="text-sm font-medium mb-2 block">Exemples prédéfinis</Label>
@@ -435,6 +512,22 @@ inf inf 0`,
                     ) : (
                       <div className="text-lg text-red-600">Aucun chemin trouvé entre 1 et {results.n}</div>
                     )}
+                  </CardContent>
+                </Card>
+
+                {/* Visualisation du Graphe */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Network className="h-5 w-5" />
+                      <span>Visualisation du Graphe</span>
+                    </CardTitle>
+                    <CardDescription>
+                      Représentation visuelle du réseau avec le chemin optimal mis en évidence
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <GraphVisualization matrix={results.matrices[0]} optimalPath={results.path} mode={results.mode} />
                   </CardContent>
                 </Card>
 
